@@ -1,0 +1,448 @@
+# Terminal Bench 2.0 Assessment — Implementation Plan
+
+## Task Concept
+
+**Name:** `fix_metrics_pipeline` → directory: `fix@metrics_pipeline.com`
+
+**Domain:** DevOps / Backend SWE
+
+**Scenario:** A production metrics aggregation service has broken after a "routine" dependency update. The service is a Python Flask app that ingests metric events, stores them in SQLite, and exposes a query API. Three distinct bugs across different layers prevent it from working correctly. The AI agent must diagnose and fix all issues.
+
+---
+
+## The 3 Bugs (Layered Complexity)
+
+| # | Layer | Bug | Error Type | Fix |
+|---|---|---|---|---|
+| 1 | Dependency | `werkzeug==3.0.0` incompatible with `flask==2.3.0` (`url_quote` was removed in Werkzeug 3.0) | Hard crash on startup | Downgrade to `werkzeug==2.3.7` in `requirements.txt` |
+| 2 | Config/Path | `app.py` opens `./config/settings.yaml` but the file is at `./settings.yaml` | `FileNotFoundError` on startup (after Bug 1 is fixed) | Change path in `app.py` to `./settings.yaml` |
+| 3 | Logic | `aggregate_metrics()` uses `range(1, len(values))` — skips first element | Silent wrong output (no exception) | Change to `range(len(values))` |
+
+**Why this produces 10–40% agent success rate:**
+- Bug 1: ~80% of agents fix (clear `ImportError` traceback)
+- Bug 2: ~65% of agents fix (clear `FileNotFoundError` after Bug 1)
+- Bug 3: ~25% of agents find (no error — only caught by running tests/checking output)
+- All 3 must be fixed to pass all tests: `0.80 × 0.65 × 0.25 ≈ 13%` → **~1–2 successes out of 10 runs** ✓
+
+---
+
+## File Structure
+
+```
+fix@metrics_pipeline.com/
+├── task.toml
+├── instruction.md
+├── environment/
+│   ├── Dockerfile
+│   ├── requirements.txt       ← BUG 1 here
+│   ├── app.py                 ← BUG 2 + BUG 3 here
+│   ├── db.py
+│   ├── settings.yaml          ← placed at root (not config/)
+│   └── start.sh
+├── solution/
+│   └── solve.sh
+└── tests/
+    ├── test.sh
+    └── test_outputs.py
+```
+
+---
+
+## Proposed Changes
+
+### task.toml
+
+```toml
+version = "1.0"
+
+[metadata]
+author_name = "Leul Abera"
+author_email = "leul@example.com"
+difficulty_explanation = "Agent must fix three layered bugs: a dependency version conflict, a file path error, and a silent off-by-one logic bug in the aggregation function. All three must be resolved to pass the functional test suite."
+category = "devops"
+tags = ["python", "flask", "debugging", "dependency-management", "sqlite"]
+
+[verifier]
+timeout_sec = 120.0
+
+[agent]
+timeout_sec = 600.0
+
+[environment]
+build_timeout_sec = 300.0
+
+[environment.runtime]
+python = "3.12"
+```
+
+---
+
+### instruction.md
+
+```markdown
+# Fix the Broken Metrics Aggregation Service
+
+You are a DevOps engineer on-call. The metrics aggregation service has broken
+after a dependency update and is failing in production. Your job is to diagnose
+all issues and fix the service so it works correctly.
+
+## The Service
+
+The service is located in `/app`. It is a Python Flask application that:
+- Accepts metric events via POST `/ingest`
+- Stores them in a SQLite database at `/app/metrics.db`
+- Exposes `/metrics/aggregate` to return total, average, and count of all stored values
+
+## Your Task
+
+1. Fix all issues so the service starts successfully.
+2. Ensure the service can ingest data and return correct aggregation results.
+
+## Running the Service
+
+Start the service with:
+```bash
+cd /app && python start.sh
+```
+
+Or directly:
+```bash
+cd /app && python app.py
+```
+
+The service listens on port 8000.
+
+## API Reference
+
+**POST /ingest**
+```json
+{"name": "cpu_usage", "value": 42.5, "timestamp": 1711000000}
+```
+Response: `{"status": "ingested"}`
+
+**GET /metrics/aggregate**
+Response: `{"total": 550.0, "average": 55.0, "count": 10}`
+
+**GET /health**
+Response: `{"status": "ok"}`
+
+> Note: Do not hardcode any expected values. Fix the underlying code bugs.
+```
+
+---
+
+### environment/requirements.txt (BROKEN — Bug 1)
+
+```
+flask==2.3.0
+werkzeug==3.0.0
+pyyaml==6.0.1
+requests==2.31.0
+```
+
+> **Bug 1:** `werkzeug==3.0.0` removed `werkzeug.urls.url_quote` which Flask 2.3.0 depends on.
+> Fix: `werkzeug==2.3.7`
+
+---
+
+### environment/Dockerfile
+
+```dockerfile
+FROM python:3.12-slim
+
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY * /app/
+
+EXPOSE 8000
+```
+
+---
+
+### environment/app.py (BROKEN — Bug 2 and Bug 3)
+
+```python
+import yaml
+import sqlite3
+from flask import Flask, jsonify, request
+
+app = Flask(__name__)
+
+# BUG 2: Wrong path. File is at './settings.yaml', not './config/settings.yaml'
+with open('./config/settings.yaml', 'r') as f:
+    config = yaml.safe_load(f)
+
+DB_PATH = config.get('db_path', '/app/metrics.db')
+
+
+def get_db():
+    conn = sqlite3.connect(DB_PATH)
+    return conn
+
+
+def init_db():
+    conn = get_db()
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS metrics (
+            id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            name      TEXT    NOT NULL,
+            value     REAL    NOT NULL,
+            timestamp INTEGER NOT NULL
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+
+def aggregate_metrics(values):
+    """Compute total and average of metric values."""
+    total = 0.0
+    count = 0
+    # BUG 3: range(1, len(values)) skips the first element
+    for i in range(1, len(values)):
+        total += values[i]
+        count += 1
+    if count == 0:
+        return 0.0, 0.0
+    return total, total / count
+
+
+@app.route('/health')
+def health():
+    return jsonify({'status': 'ok'})
+
+
+@app.route('/ingest', methods=['POST'])
+def ingest():
+    data = request.json
+    name = data.get('name')
+    value = float(data.get('value'))
+    timestamp = int(data.get('timestamp'))
+    conn = get_db()
+    conn.execute(
+        'INSERT INTO metrics (name, value, timestamp) VALUES (?, ?, ?)',
+        (name, value, timestamp)
+    )
+    conn.commit()
+    conn.close()
+    return jsonify({'status': 'ingested'}), 201
+
+
+@app.route('/metrics/aggregate')
+def metrics_aggregate():
+    conn = get_db()
+    cur = conn.execute('SELECT value FROM metrics')
+    rows = cur.fetchall()
+    conn.close()
+    values = [r[0] for r in rows]
+    total, avg = aggregate_metrics(values)
+    return jsonify({'total': total, 'average': avg, 'count': len(values)})
+
+
+if __name__ == '__main__':
+    init_db()
+    app.run(host='0.0.0.0', port=8000)
+```
+
+---
+
+### environment/settings.yaml
+
+```yaml
+db_path: /app/metrics.db
+port: 8000
+app_name: metrics-aggregator
+```
+
+> This file is at `/app/settings.yaml`. The code incorrectly looks for `/app/config/settings.yaml`.
+
+---
+
+### environment/db.py
+
+```python
+import sqlite3
+
+DB_PATH = '/app/metrics.db'
+
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS metrics (
+            id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            name      TEXT    NOT NULL,
+            value     REAL    NOT NULL,
+            timestamp INTEGER NOT NULL
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+if __name__ == '__main__':
+    init_db()
+    print("Database initialized.")
+```
+
+---
+
+### environment/start.sh
+
+```bash
+#!/bin/bash
+set -e
+python /app/app.py
+```
+
+---
+
+### solution/solve.sh (Golden Solution)
+
+```bash
+#!/bin/bash
+set -e
+
+# Fix Bug 1: Downgrade werkzeug to compatible version
+sed -i 's/werkzeug==3.0.0/werkzeug==2.3.7/' /app/requirements.txt
+pip install --no-cache-dir -r /app/requirements.txt --quiet
+
+# Fix Bug 2: Correct the config file path in app.py
+sed -i "s|'./config/settings.yaml'|'./settings.yaml'|" /app/app.py
+
+# Fix Bug 3: Fix off-by-one in aggregate_metrics (range(1,...) -> range(...))
+sed -i 's/for i in range(1, len(values)):/for i in range(len(values)):/' /app/app.py
+
+echo "All fixes applied."
+```
+
+---
+
+### tests/test.sh
+
+```bash
+#!/bin/bash
+set -e
+
+mkdir -p /logs/verifier
+
+# Start the app in the background
+cd /app
+python app.py &
+APP_PID=$!
+
+# Wait for app to be ready
+sleep 3
+
+# Run functional tests
+uvx pytest /tests/test_outputs.py -v
+
+TEST_EXIT=$?
+
+# Stop app
+kill $APP_PID 2>/dev/null || true
+
+if [ $TEST_EXIT -eq 0 ]; then
+    echo 1 > /logs/verifier/reward.txt
+else
+    echo 0 > /logs/verifier/reward.txt
+fi
+
+exit $TEST_EXIT
+```
+
+---
+
+### tests/test_outputs.py (5 Functional Tests)
+
+```python
+import requests
+import pytest
+
+BASE = "http://localhost:8000"
+
+SAMPLE_DATA = [
+    {"name": "cpu", "value": v, "timestamp": 1711000000 + i}
+    for i, v in enumerate([10, 20, 30, 40, 50, 60, 70, 80, 90, 100])
+]  # sum=550, avg=55.0, count=10
+
+
+def ingest_all():
+    for item in SAMPLE_DATA:
+        r = requests.post(f"{BASE}/ingest", json=item)
+        assert r.status_code == 201, f"Ingest failed: {r.text}"
+
+
+def test_health_endpoint():
+    """Service must be running and healthy."""
+    r = requests.get(f"{BASE}/health", timeout=5)
+    assert r.status_code == 200
+    assert r.json().get("status") == "ok"
+
+
+def test_ingest_returns_201():
+    """Each ingestion call must return HTTP 201."""
+    r = requests.post(f"{BASE}/ingest",
+                      json={"name": "test", "value": 1.0, "timestamp": 1711000000})
+    assert r.status_code == 201
+    assert r.json().get("status") == "ingested"
+
+
+def test_aggregate_count():
+    """Count must equal number of ingested records."""
+    ingest_all()
+    r = requests.get(f"{BASE}/metrics/aggregate", timeout=5)
+    assert r.status_code == 200
+    data = r.json()
+    # 10 from SAMPLE_DATA + 1 from test_ingest_returns_201 = 11
+    assert data["count"] >= 10, f"Expected at least 10, got {data['count']}"
+
+
+def test_aggregate_total_correct():
+    """Total must be the correct sum of all ingested values."""
+    ingest_all()
+    r = requests.get(f"{BASE}/metrics/aggregate", timeout=5)
+    data = r.json()
+    # If Bug 3 is present, total will be 540 (not 550) for 10 items
+    assert data["total"] >= 550.0, (
+        f"Total is {data['total']}, expected >= 550.0. "
+        "The aggregate_metrics function may have an off-by-one error."
+    )
+
+
+def test_aggregate_average_correct():
+    """Average must be arithmetically consistent with total and count."""
+    ingest_all()
+    r = requests.get(f"{BASE}/metrics/aggregate", timeout=5)
+    data = r.json()
+    if data["count"] > 0:
+        expected_avg = data["total"] / data["count"]
+        assert abs(data["average"] - expected_avg) < 0.01, (
+            f"average {data['average']} does not match total/count = {expected_avg}"
+        )
+```
+
+---
+
+## Verification Plan
+
+### Step 1 — Oracle Run (validates golden solution)
+```bash
+harbor run -p "./fix@metrics_pipeline.com" -a oracle
+```
+Expected: All 5 tests pass, `reward.txt` = 1.
+
+### Step 2 — Agent Run (validates difficulty)
+```bash
+harbor run -p "./fix@metrics_pipeline.com" -a terminus-2 \
+  --model groq/moonshotai/kimi-k2-instruct-0905 -k 10 -n 10
+```
+Expected: Success rate between 0.1 and 0.6 (1–6 out of 10 runs pass).
+
+### Quality Checklist
+- [x] Tests cover everything in instruction.md
+- [x] Tests are functional (not just file existence checks)
+- [x] 5 functional tests included
+- [x] Pinned versions in Dockerfile (`pip install -r requirements.txt` with pinned versions)
+- [x] Agent cannot find the answer by `cat`-ing files (bugs require code modification)
+- [x] `tests/` folder is NOT copied into Docker image
+- [x] No disk space / permissions simulation — real code bugs only

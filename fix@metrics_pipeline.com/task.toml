@@ -1,0 +1,20 @@
+version = "1.0"
+
+[metadata]
+author_name = "Leul Abera"
+author_email = "leul@example.com"
+difficulty_explanation = "Agent must fix three layered bugs: a dependency version conflict, a file path error, and a silent off-by-one logic bug in the aggregation function. All three must be resolved to pass the functional test suite."
+category = "devops"
+tags = ["python", "flask", "debugging", "dependency-management", "sqlite"]
+
+[verifier]
+timeout_sec = 120.0
+
+[agent]
+timeout_sec = 600.0
+
+[environment]
+build_timeout_sec = 300.0
+
+[environment.runtime]
+python = "3.12"

@@ -1,0 +1,20 @@
+import sqlite3
+
+DB_PATH = '/app/metrics.db'
+
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS metrics (
+            id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            name      TEXT    NOT NULL,
+            value     REAL    NOT NULL,
+            timestamp INTEGER NOT NULL
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+if __name__ == '__main__':
+    init_db()
+    print("Database initialized.")

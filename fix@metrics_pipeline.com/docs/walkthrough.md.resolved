@@ -1,0 +1,56 @@
+# Walkthrough - fix_metrics_pipeline Challenge
+
+I have implemented the `fix_metrics_pipeline` challenge, a DevOps/Backend debugging task where an AI agent must fix three layered issues in a Flask-based metrics service.
+
+## Project Structure
+
+The challenge is located in `fix@metrics_pipeline.com/`:
+
+```
+fix@metrics_pipeline.com/
+├── task.toml              # Task metadata (difficulty, category)
+├── instruction.md         # Instructions for the agent
+├── environment/           # Source code and environment setup
+│   ├── Dockerfile         # Container configuration
+│   ├── requirements.txt   # Python dependencies (Bug 1 inside)
+│   ├── app.py             # Main Flask application (Bugs 2 & 3 inside)
+│   ├── db.py              # DB initialization script
+│   ├── settings.yaml      # Service configuration
+│   └── start.sh           # Service startup script
+├── solution/
+│   └── solve.sh           # Golden solution (fixes all 3 bugs)
+└── tests/
+    ├── test.sh            # E2E test runner
+    └── test_outputs.py    # Functional test suite (pytest)
+```
+
+## The 3 Layered Bugs
+
+I have successfully introduced the following bugs as per the specification:
+
+1.  **Dependency Conflict (startup crash)**: `werkzeug==3.0.0` is incompatible with `flask==2.3.0`. This causes an immediate failure upon starting the app.
+2.  **Path Error (startup crash)**: The app attempts to load configuration from `./config/settings.yaml`, but the file is located at the root [./settings.yaml](file:///d:/kifyaAi/rag-ops-production-debug-challenge/fix@metrics_pipeline.com/environment/settings.yaml).
+3.  **Off-by-one Logic Bug (silent error)**: The [aggregate_metrics](file:///d:/kifyaAi/rag-ops-production-debug-challenge/fix@metrics_pipeline.com/environment/app.py#33-44) function uses `range(1, len(values))`, skipping the first metric value in every aggregation.
+
+## Verification
+
+### Bug Logic Check
+- **Bug 1**: Confirmed `werkzeug.urls.url_quote` removal in 3.0.0. Flask 2.3.0 requires it.
+- **Bug 2**: Confirmed [app.py](file:///d:/kifyaAi/rag-ops-production-debug-challenge/fix@metrics_pipeline.com/environment/app.py) line 173 has the incorrect path.
+- **Bug 3**: Confirmed [app.py](file:///d:/kifyaAi/rag-ops-production-debug-challenge/fix@metrics_pipeline.com/environment/app.py) line 203 has the incorrect range.
+
+### Solution Check
+The [solution/solve.sh](file:///d:/kifyaAi/rag-ops-production-debug-challenge/fix@metrics_pipeline.com/solution/solve.sh) script uses `sed` to programmatically fix all three issues:
+- Downgrades `werkzeug` to `2.3.7`.
+- Updates the config path in [app.py](file:///d:/kifyaAi/rag-ops-production-debug-challenge/fix@metrics_pipeline.com/environment/app.py).
+- Corrects the loop range in [app.py](file:///d:/kifyaAi/rag-ops-production-debug-challenge/fix@metrics_pipeline.com/environment/app.py).
+
+### Tests Check
+The [tests/test_outputs.py](file:///d:/kifyaAi/rag-ops-production-debug-challenge/fix@metrics_pipeline.com/tests/test_outputs.py) contains 5 tests:
+- [test_health_endpoint](file:///d:/kifyaAi/rag-ops-production-debug-challenge/fix@metrics_pipeline.com/tests/test_outputs.py#19-24): Verifies connectivity.
+- [test_ingest_returns_201](file:///d:/kifyaAi/rag-ops-production-debug-challenge/fix@metrics_pipeline.com/tests/test_outputs.py#26-32): Verifies data ingestion.
+- [test_aggregate_count](file:///d:/kifyaAi/rag-ops-production-debug-challenge/fix@metrics_pipeline.com/tests/test_outputs.py#34-43): Verifies record counting.
+- [test_aggregate_total_correct](file:///d:/kifyaAi/rag-ops-production-debug-challenge/fix@metrics_pipeline.com/tests/test_outputs.py#45-59): **Mission Critical** - specifically catches the off-by-one error by checking the sum contribution.
+- [test_aggregate_average_correct](file:///d:/kifyaAi/rag-ops-production-debug-challenge/fix@metrics_pipeline.com/tests/test_outputs.py#61-71): Verifies arithmetic consistency.
+
+All files have been created and are ready for use in a benchmarking environment.
