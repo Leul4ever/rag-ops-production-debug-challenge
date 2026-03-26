@@ -1,7 +1,7 @@
 version = "1.0"
 
 [metadata]
-author_name = "Leul Abera"
+author_name = "Leul Abera Tumdedo"
 author_email = "leul0593@gmail.com"
 difficulty_explanation = "Agent must fix three layered bugs: a dependency version conflict, a file path error, and a silent off-by-one logic bug in the aggregation function. All three must be resolved to pass the functional test suite."
 category = "devops"
