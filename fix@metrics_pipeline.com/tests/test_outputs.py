@@ -43,18 +43,25 @@ def test_aggregate_count():
 
 
 def test_aggregate_total_correct():
-    """Total must be the correct sum of all ingested values."""
-    # We ingest fresh data for this test
-    # Note: SQLite keeps data across tests in this execution mode
+    """Total must be the correct sum of all ingested values, verified dynamically."""
+    # Get current total
     conn_val = requests.get(f"{BASE}/metrics/aggregate").json()["total"]
-    ingest_all()
+    
+    # Ingest a new set of values
+    dynamic_values = [15.5, 25.5, 10.0]
+    dynamic_sum = sum(dynamic_values)
+    for i, v in enumerate(dynamic_values):
+        requests.post(f"{BASE}/ingest", 
+                      json={"name": f"dyn_{i}", "value": v, "timestamp": 1711000000})
+    
+    # Check new total
     r = requests.get(f"{BASE}/metrics/aggregate", timeout=5)
     data = r.json()
-    # If Bug 3 is present, the NEWly added 550 will be 540
-    # So the difference must be exactly 550
-    assert data["total"] - conn_val == 550.0, (
-        f"New total contribution is {data['total'] - conn_val}, expected 550.0. "
-        "The aggregate_metrics function may have an off-by-one error."
+    
+    # If Bug 3 is present (skips first record in the loop), the difference will be 35.5 instead of 51.0
+    assert abs((data["total"] - conn_val) - dynamic_sum) < 0.001, (
+        f"New total contribution is {data['total'] - conn_val}, expected {dynamic_sum}. "
+        "The aggregate_metrics function may have an off-by-one error (skipping the first record)."
     )
 
 

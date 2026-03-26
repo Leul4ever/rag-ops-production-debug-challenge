@@ -1,3 +1,4 @@
 db_path: /app/metrics.db
 port: 8000
 app_name: metrics-aggregator
+
