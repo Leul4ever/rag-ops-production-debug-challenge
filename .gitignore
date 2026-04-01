@@ -1,0 +1,24 @@
+# Environment variables
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+venv/
+ENV/
+build/
+dist/
+
+# Harbor / Docker / Job Results
+jobs/
+tmp_verify/
+
+# Submission Packages
+*.zip
+
+# OS Files
+.DS_Store
+Thumbs.db

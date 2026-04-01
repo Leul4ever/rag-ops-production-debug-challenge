@@ -4,6 +4,9 @@ set -e
 mkdir -p /logs/verifier
 touch /logs/verifier/reward.txt
 
+# Ensure test requirements are installed
+pip install -r /tests/requirements-test.txt --quiet
+
 # Start the app in the background
 cd /app
 python app.py &
